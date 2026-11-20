@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Photo Search</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: #f6f7f9; color: #1d2330; }
+    header { background: #1d2330; color: #fff; padding: 20px 24px; }
+    header h1 { margin: 0; font-size: 22px; }
+    header p { margin: 4px 0 0; opacity: .75; font-size: 14px; }
+    main { max-width: 1000px; margin: 0 auto; padding: 24px 16px; }
+    .card { background: #fff; border-radius: 10px; padding: 18px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    .card h2 { margin: 0 0 12px; font-size: 17px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; }
+    input[type=text] { flex: 1; min-width: 200px; padding: 10px 12px; border: 1px solid #c9ced6; border-radius: 8px; font-size: 15px; }
+    input[type=file] { flex: 1; min-width: 200px; font-size: 14px; }
+    button { padding: 10px 18px; border: 0; border-radius: 8px; background: #2f6fed; color: #fff; font-size: 15px; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: default; }
+    .status { margin-top: 10px; font-size: 14px; min-height: 18px; }
+    .status.err { color: #c62828; }
+    .status.ok { color: #2e7d32; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+    .photo { background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    .photo img { width: 100%; height: 180px; object-fit: cover; display: block; background: #e4e7ec; }
+    .labels { padding: 8px 10px; display: flex; flex-wrap: wrap; gap: 4px; }
+    .labels span { background: #eef2fb; color: #2f4a8a; font-size: 12px; padding: 2px 8px; border-radius: 10px; }
+    .hint { font-size: 13px; color: #6b7280; margin-top: 6px; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Photo Search</h1>
+  <p>Search your photos in plain English: "dogs", "show me cats and dogs", or any custom label.</p>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Search</h2>
+    <form id="searchForm" class="row">
+      <input type="text" id="query" placeholder="e.g. show me dogs and trees" autocomplete="off">
+      <button type="submit" id="searchBtn">Search</button>
+    </form>
+    <div id="searchStatus" class="status"></div>
+  </section>
+
+  <section class="card">
+    <h2>Upload a photo</h2>
+    <form id="uploadForm">
+      <div class="row">
+        <input type="file" id="file" accept="image/*">
+        <input type="text" id="customLabels" placeholder="Custom labels, comma separated (e.g. Sam, Sally)">
+        <button type="submit" id="uploadBtn">Upload</button>
+      </div>
+      <div class="hint">Custom labels are sent as the x-amz-meta-customLabels header and added to the labels Rekognition detects.</div>
+    </form>
+    <div id="uploadStatus" class="status"></div>
+  </section>
+
+  <section id="results" class="grid"></section>
+</main>
+
+<!-- API Gateway generated JavaScript SDK (SDK1) -->
+<script src="lib/axios/dist/axios.standalone.js"></script>
+<script src="lib/CryptoJS/rollups/crypto-js.js"></script>
+<script src="lib/CryptoJS/rollups/sha256.js"></script>
+<script src="lib/CryptoJS/components/hmac.js"></script>
+<script src="lib/CryptoJS/components/enc-base64.js"></script>
+<script src="lib/url-template/url-template.js"></script>
+<script src="lib/apiGatewayCore/sigV4Client.js"></script>
+<script src="lib/apiGatewayCore/apiGatewayClient.js"></script>
+<script src="lib/apiGatewayCore/simpleHttpClient.js"></script>
+<script src="lib/apiGatewayCore/utils.js"></script>
+<script src="apigClient.js"></script>
+
+<script>
+  // ---- Config ----
+  const API_KEY = "tMi8Xzk72C6ZH4gxbNbeC5E2KW839hrGasLHAXv4";
+  const API_BASE = "https://343t9xgt2j.execute-api.us-east-1.amazonaws.com/prod";
+
+  const apigClient = apigClientFactory.newClient({ apiKey: API_KEY });
+
+  const $ = (id) => document.getElementById(id);
+
+  function setStatus(el, msg, kind) {
+    el.textContent = msg;
+    el.className = "status" + (kind ? " " + kind : "");
+  }
+
+  function renderResults(results) {
+    const grid = $("results");
+    grid.innerHTML = "";
+    results.forEach((r) => {
+      const card = document.createElement("div");
+      card.className = "photo";
+      const img = document.createElement("img");
+      img.src = r.url;
+      img.alt = (r.labels || []).join(", ");
+      img.loading = "lazy";
+      const labels = document.createElement("div");
+      labels.className = "labels";
+      (r.labels || []).forEach((l) => {
+        const s = document.createElement("span");
+        s.textContent = l;
+        labels.appendChild(s);
+      });
+      card.appendChild(img);
+      card.appendChild(labels);
+      grid.appendChild(card);
+    });
+  }
+
+  // ---- Search: GET /search?q=... via the generated SDK ----
+  $("searchForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const q = $("query").value.trim();
+    const status = $("searchStatus");
+    if (!q) return setStatus(status, "Type something to search.", "err");
+
+    $("searchBtn").disabled = true;
+    setStatus(status, "Searching…");
+    try {
+      const res = await apigClient.searchGet({ q: q }, {}, {});
+      const data = typeof res.data === "string" ? JSON.parse(res.data) : res.data;
+      const results = (data && data.results) || [];
+      renderResults(results);
+      setStatus(status, results.length ? `${results.length} photo(s) found.` : "No photos matched.", results.length ? "ok" : "");
+    } catch (err) {
+      console.error(err);
+      setStatus(status, "Search failed. Check the browser console for details.", "err");
+    } finally {
+      $("searchBtn").disabled = false;
+    }
+  });
+
+  // ---- Upload: PUT /photos/{object} (S3 proxy) with x-amz-meta-customLabels ----
+  // Uses fetch for the binary body: the generated SDK copies request bodies as
+  // plain objects, which corrupts image data. Same endpoint, same API key.
+  $("uploadForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const file = $("file").files[0];
+    const status = $("uploadStatus");
+    if (!file) return setStatus(status, "Choose a photo first.", "err");
+
+    const labels = $("customLabels").value
+      .split(",").map((s) => s.trim()).filter(Boolean).join(", ");
+
+    // Safe, unique S3 key: timestamp + filename without spaces/special chars
+    const safeName = Date.now() + "-" + file.name.replace(/[^A-Za-z0-9._-]/g, "_");
+
+    const headers = {
+      "x-api-key": API_KEY,
+      "Content-Type": file.type || "image/jpeg",
+    };
+    if (labels) headers["x-amz-meta-customLabels"] = labels;
+
+    $("uploadBtn").disabled = true;
+    setStatus(status, "Uploading…");
+    try {
+      const res = await fetch(`${API_BASE}/photos/${encodeURIComponent(safeName)}`, {
+        method: "PUT",
+        headers,
+        body: file,
+      });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      setStatus(status, `Uploaded ${safeName}${labels ? " with labels: " + labels : ""}. It will be searchable in ~10 seconds.`, "ok");
+      $("uploadForm").reset();
+    } catch (err) {
+      console.error(err);
+      setStatus(status, "Upload failed: " + err.message, "err");
+    } finally {
+      $("uploadBtn").disabled = false;
+    }
+  });
+</script>
+</body>
+</html>
